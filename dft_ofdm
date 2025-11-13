@@ -1,0 +1,321 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.fft import fft, ifft
+import time
+from typing import List, Tuple, Dict
+import warnings
+warnings.filterwarnings('ignore')
+
+class NR5GPHYModel:
+    def __init__(self):
+        self.results = {}
+        
+    def ofdm_modulation(self, data: np.ndarray, fft_size: int = 1024, cp_len: int = 72) -> np.ndarray:
+        """
+        Conventional OFDM modulation
+        """
+        # Zero-pad data to FFT size
+        ofdm_symbol = np.zeros(fft_size, dtype=complex)
+        ofdm_symbol[:len(data)] = data
+        
+        # Apply IFFT
+        time_domain = ifft(ofdm_symbol, norm='ortho')
+        
+        # Add cyclic prefix
+        cp = time_domain[-cp_len:]
+        ofdm_signal = np.concatenate([cp, time_domain])
+        
+        return ofdm_signal
+    
+    def dfts_ofdm_modulation(self, data: np.ndarray, fft_size: int = 1024, cp_len: int = 72) -> np.ndarray:
+        """
+        DFT-spread OFDM modulation for PAPR reduction
+        """
+        # Apply DFT precoding
+        dft_precoded = fft(data, norm='ortho')
+        
+        # Map to subcarriers
+        ofdm_symbol = np.zeros(fft_size, dtype=complex)
+        ofdm_symbol[:len(dft_precoded)] = dft_precoded
+        
+        # Apply IFFT
+        time_domain = ifft(ofdm_symbol, norm='ortho')
+        
+        # Add cyclic prefix
+        cp = time_domain[-cp_len:]
+        dfts_ofdm_signal = np.concatenate([cp, time_domain])
+        
+        return dfts_ofdm_signal
+    
+    def calculate_papr(self, signal: np.ndarray) -> float:
+        """
+        Calculate Peak-to-Average Power Ratio
+        """
+        power = np.abs(signal) ** 2
+        peak_power = np.max(power)
+        avg_power = np.mean(power)
+        papr = 10 * np.log10(peak_power / avg_power)
+        return papr
+    
+    def benchmark_papr(self, num_symbols: int = 1000, modulation: str = 'QPSK') -> Dict:
+        """
+        Benchmark PAPR for OFDM vs DFT-s-OFDM
+        """
+        if modulation == 'QPSK':
+            mod_order = 4
+            data_constellation = np.exp(1j * np.pi / 4 * (2 * np.arange(4) + 1))
+        else:  # 16QAM
+            mod_order = 16
+            # Simplified 16QAM constellation
+            data_constellation = np.array([-3-3j, -3-1j, -3+3j, -3+1j,
+                                          -1-3j, -1-1j, -1+3j, -1+1j,
+                                          3-3j, 3-1j, 3+3j, 3+1j,
+                                          1-3j, 1-1j, 1+3j, 1+1j]) / np.sqrt(10)
+        
+        ofdm_papr = []
+        dfts_ofdm_papr = []
+        
+        for _ in range(num_symbols):
+            # Generate random data
+            data_indices = np.random.randint(0, mod_order, 72)  # 6 PRBs
+            data_symbols = data_constellation[data_indices]
+            
+            # OFDM modulation
+            ofdm_signal = self.ofdm_modulation(data_symbols)
+            ofdm_papr.append(self.calculate_papr(ofdm_signal))
+            
+            # DFT-s-OFDM modulation
+            dfts_signal = self.dfts_ofdm_modulation(data_symbols)
+            dfts_ofdm_papr.append(self.calculate_papr(dfts_signal))
+        
+        ofdm_avg_papr = np.mean(ofdm_papr)
+        dfts_avg_papr = np.mean(dfts_ofdm_papr)
+        papr_reduction = ofdm_avg_papr - dfts_avg_papr
+        
+        self.results['papr'] = {
+            'ofdm_avg_papr': ofdm_avg_papr,
+            'dfts_ofdm_avg_papr': dfts_avg_papr,
+            'papr_reduction_db': papr_reduction
+        }
+        
+        return self.results['papr']
+    
+    def flexible_numerology(self, subcarrier_spacing: List[int] = [15, 30, 60, 120]) -> Dict:
+        """
+        Model flexible numerology and calculate slot latency
+        """
+        slot_durations = {}
+        slot_latencies = {}
+        
+        for scs in subcarrier_spacing:
+            # Slot duration in ms = 1 / (number of slots per subframe)
+            # For normal CP: slots_per_subframe = scs / 15
+            slots_per_subframe = scs / 15
+            slot_duration_ms = 1 / slots_per_subframe
+            slot_durations[scs] = slot_duration_ms
+            slot_latencies[scs] = slot_duration_ms
+        
+        # Calculate latency reduction
+        latency_15kHz = slot_latencies[15]
+        latency_120kHz = slot_latencies[120]
+        latency_reduction = (latency_15kHz - latency_120kHz) / latency_15kHz * 100
+        
+        self.results['numerology'] = {
+            'slot_durations': slot_durations,
+            'latency_reduction_percent': latency_reduction
+        }
+        
+        return self.results['numerology']
+    
+    def mini_slot_scheduling(self, traffic_pattern: str = 'bursty', 
+                           num_transmissions: int = 1000) -> Dict:
+        """
+        Compare slot-based vs mini-slot scheduling
+        """
+        # Slot-based scheduling (1 slot = 14 symbols)
+        # Mini-slot scheduling (2-7 symbols)
+        
+        slot_based_delays = []
+        mini_slot_delays = []
+        
+        for i in range(num_transmissions):
+            if traffic_pattern == 'bursty':
+                # Random arrival time within slot
+                arrival_time = np.random.uniform(0, 1)
+                
+                # Slot-based: wait for next slot boundary
+                slot_delay = 1 - arrival_time if arrival_time > 0 else 0
+                slot_based_delays.append(slot_delay)
+                
+                # Mini-slot based: wait for next mini-slot boundary (1/7 of slot)
+                mini_slot_size = 1 / 7  # 2 symbols in 14-symbol slot
+                mini_slot_delay = (np.ceil(arrival_time / mini_slot_size) * mini_slot_size - arrival_time)
+                mini_slot_delays.append(mini_slot_delay)
+            
+            elif traffic_pattern == 'periodic':
+                # Periodic traffic with random phase
+                phase_offset = np.random.uniform(0, 0.5)
+                
+                # Slot-based scheduling
+                slot_based_delays.append(phase_offset)
+                
+                # Mini-slot scheduling
+                mini_slot_delay = phase_offset % (1/7)
+                mini_slot_delays.append(mini_slot_delay)
+        
+        avg_slot_delay = np.mean(slot_based_delays)
+        avg_mini_slot_delay = np.mean(mini_slot_delays)
+        delay_reduction = (avg_slot_delay - avg_mini_slot_delay) / avg_slot_delay * 100
+        
+        self.results['scheduling'] = {
+            'avg_slot_delay': avg_slot_delay,
+            'avg_mini_slot_delay': avg_mini_slot_delay,
+            'delay_reduction_percent': delay_reduction
+        }
+        
+        return self.results['scheduling']
+    
+    def run_complete_analysis(self) -> Dict:
+        """
+        Run complete 5G NR PHY analysis
+        """
+        print("Running 5G NR PHY Modeling and Analysis...")
+        print("=" * 50)
+        
+        # 1. PAPR Benchmarking
+        print("\n1. PAPR Reduction Analysis (DFT-s-OFDM vs OFDM)")
+        papr_results = self.benchmark_papr()
+        print(f"   OFDM PAPR: {papr_results['ofdm_avg_papr']:.2f} dB")
+        print(f"   DFT-s-OFDM PAPR: {papr_results['dfts_ofdm_avg_papr']:.2f} dB")
+        print(f"   PAPR Reduction: {papr_results['papr_reduction_db']:.2f} dB")
+        
+        # 2. Flexible Numerology
+        print("\n2. Flexible Numerology Analysis")
+        numerology_results = self.flexible_numerology()
+        for scs, duration in numerology_results['slot_durations'].items():
+            print(f"   {scs} kHz SCS: {duration:.3f} ms per slot")
+        print(f"   Latency Reduction (15kHz→120kHz): {numerology_results['latency_reduction_percent']:.1f}%")
+        
+        # 3. Mini-slot Scheduling
+        print("\n3. Mini-slot Scheduling Analysis")
+        scheduling_results = self.mini_slot_scheduling()
+        print(f"   Slot-based avg delay: {scheduling_results['avg_slot_delay']:.3f} ms")
+        print(f"   Mini-slot avg delay: {scheduling_results['avg_mini_slot_delay']:.3f} ms")
+        print(f"   Delay Reduction: {scheduling_results['delay_reduction_percent']:.1f}%")
+        
+        return self.results
+    
+    def plot_results(self):
+        """
+        Generate comprehensive plots for the analysis
+        """
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 12))
+        
+        # PAPR Comparison
+        papr_data = [self.results['papr']['ofdm_avg_papr'], 
+                    self.results['papr']['dfts_ofdm_avg_papr']]
+        labels = ['OFDM', 'DFT-s-OFDM']
+        colors = ['red', 'green']
+        ax1.bar(labels, papr_data, color=colors, alpha=0.7)
+        ax1.set_ylabel('PAPR (dB)')
+        ax1.set_title('PAPR Comparison: OFDM vs DFT-s-OFDM')
+        ax1.grid(True, alpha=0.3)
+        
+        # Slot Duration vs SCS
+        scs_values = list(self.results['numerology']['slot_durations'].keys())
+        durations = list(self.results['numerology']['slot_durations'].values())
+        ax2.plot(scs_values, durations, 'bo-', linewidth=2, markersize=8)
+        ax2.set_xlabel('Subcarrier Spacing (kHz)')
+        ax2.set_ylabel('Slot Duration (ms)')
+        ax2.set_title('Flexible Numerology: Slot Duration vs SCS')
+        ax2.grid(True, alpha=0.3)
+        
+        # Latency Reduction
+        latency_reduction = [0, 50, 75, self.results['numerology']['latency_reduction_percent']]
+        scs_labels = ['15 kHz', '30 kHz', '60 kHz', '120 kHz']
+        ax3.bar(scs_labels, latency_reduction, color='orange', alpha=0.7)
+        ax3.set_ylabel('Latency Reduction (%)')
+        ax3.set_title('Latency Reduction with Higher SCS\n(Relative to 15 kHz)')
+        ax3.grid(True, alpha=0.3)
+        
+        # Scheduling Delay Comparison
+        delay_data = [self.results['scheduling']['avg_slot_delay'],
+                     self.results['scheduling']['avg_mini_slot_delay']]
+        delay_labels = ['Slot-based', 'Mini-slot']
+        ax4.bar(delay_labels, delay_data, color=['blue', 'cyan'], alpha=0.7)
+        ax4.set_ylabel('Average Delay (ms)')
+        ax4.set_title('Scheduling Delay: Slot vs Mini-slot')
+        ax4.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.savefig('5g_nr_phy_analysis.png', dpi=300, bbox_inches='tight')
+        plt.show()
+
+# Advanced implementation with additional features
+class Advanced5GModel(NR5GPHYModel):
+    def __init__(self):
+        super().__init__()
+        
+    def simulate_urllc_scenario(self, num_ue: int = 10, simulation_time: int = 1000):
+        """
+        Simulate URLLC scenario with mixed traffic
+        """
+        print(f"\n4. URLLC Scenario Simulation ({num_ue} UEs)")
+        
+        # Traffic types: eMBB, URLLC, mMTC
+        traffic_types = ['eMBB', 'URLLC', 'mMTC']
+        traffic_weights = [0.6, 0.3, 0.1]  # Traffic distribution
+        
+        slot_based_latencies = []
+        mini_slot_latencies = []
+        
+        for _ in range(simulation_time):
+            for ue_id in range(num_ue):
+                traffic_type = np.random.choice(traffic_types, p=traffic_weights)
+                
+                if traffic_type == 'URLLC':
+                    # URLLC requires immediate transmission
+                    arrival_time = np.random.uniform(0, 1)
+                    
+                    # Slot-based delay
+                    slot_delay = 1 - arrival_time
+                    slot_based_latencies.append(slot_delay)
+                    
+                    # Mini-slot delay (2-symbol mini-slots)
+                    mini_slot_delay = (np.ceil(arrival_time / (2/14)) * (2/14) - arrival_time)
+                    mini_slot_latencies.append(mini_slot_delay)
+        
+        avg_slot_latency = np.mean(slot_based_latencies)
+        avg_mini_slot_latency = np.mean(mini_slot_latencies)
+        improvement = (avg_slot_latency - avg_mini_slot_latency) / avg_slot_latency * 100
+        
+        print(f"   URLLC Avg Latency - Slot-based: {avg_slot_latency:.3f} ms")
+        print(f"   URLLC Avg Latency - Mini-slot: {avg_mini_slot_latency:.3f} ms")
+        print(f"   Latency Improvement: {improvement:.1f}%")
+        
+        return {
+            'slot_based_latency': avg_slot_latency,
+            'mini_slot_latency': avg_mini_slot_latency,
+            'improvement_percent': improvement
+        }
+
+# Run the complete analysis
+if __name__ == "__main__":
+    # Basic 5G NR PHY Model
+    print("5G NR Physical Layer Modeling and Analysis")
+    print("=" * 50)
+    
+    model = NR5GPHYModel()
+    results = model.run_complete_analysis()
+    model.plot_results()
+    
+    # Advanced URLLC simulation
+    advanced_model = Advanced5GModel()
+    urllc_results = advanced_model.simulate_urllc_scenario()
+    
+    print("\n" + "=" * 50)
+    print("SUMMARY OF KEY ACHIEVEMENTS:")
+    print(f"• PAPR Reduction: {results['papr']['papr_reduction_db']:.1f} dB (DFT-s-OFDM)")
+    print(f"• Latency Reduction: {results['numerology']['latency_reduction_percent']:.1f}% (120 kHz SCS)")
+    print(f"• Delay Reduction: {results['scheduling']['delay_reduction_percent']:.1f}% (Mini-slot)")
+    print(f"• URLLC Improvement: {urllc_results['improvement_percent']:.1f}%")
