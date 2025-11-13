@@ -1,0 +1,12 @@
+oncept: The project analyzed the Uplink (UL) waveform, Discrete Fourier Transform-spread OFDM (DFT-s-OFDM), which is also known as Single Carrier-Frequency Division Multiple Access (SC-FDMA) in LTE. The goal of this waveform is to ensure the transmitted signal has a low Peak-to-Average Power Ratio (PAPR).
+Achievement: A 9 dB PAPR reduction was demonstrated compared to standard CP-OFDM.
+Significance: A lower PAPR means the User Equipment's (UE) Power Amplifier (PA) can operate closer to its saturation point without causing significant signal distortion, thus increasing the PA's efficiency. This directly enhances uplink coverage and extends mobile device battery life.
+Concept: Numerology in 5G NR refers to the subcarrier spacing (SCS). Unlike 4G LTE's fixed 15 kHz SCS, 5G NR allows for scalable numerology (e.g., 15, 30, 60, 120, 240 kHz, etc.). The duration of an OFDM symbol and a time slot is inversely proportional to the SCS.
+Achievement: Quantifying an 87% reduction in slot latency by switching to a 120 kHz subcarrier spacing (compared to a baseline, likely 15 kHz or 30 kHz).
+Significance: A shorter slot duration reduces the time a device has to wait for a scheduling opportunity, which is a fundamental requirement for URLLC applications like remote surgery and industrial automation, where latency must be below 1 ms.
+Mini-Slot Scheduling for Immediate Transmission (URLLC) Concept: Traditional scheduling uses fixed-duration time slots (e.g., 14 OFDM symbols). Mini-slots (or non-slot-based transmission) allow data to be transmitted using only a few OFDM symbols (e.g., 2, 4, or 7 symbols) without waiting for the full slot boundary.
+Achievement: A simulation demonstrated an 85% cut in transmission delay compared to traditional slot-based scheduling.
+Significance: This feature allows mission-critical traffic (like an emergency message) to be sent immediately upon arrival, preempting any lower-priority traffic already scheduled, which is critical for meeting the stringent URLLC latency target.
+Primary Tool: MATLAB with the 5G Toolbox and Communications Toolbox. This is ideal for PHY layer and link-level simulations where complex signal processing and performance benchmarking (like PAPR and BER) are needed.
+Alternative/System-Level: ns-3 (Network Simulator 3) with the 5G-LENA module, or OMNeT++ with Simu5G. These are better for simulating the scheduling and resource management aspects (like mini-slots) in a multi-user, multi-cell environment.
+Language: MATLAB (for signal processing) or C++/Python (for network simulators).
